@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from sawyer_control.srv import *
+from robot_info.srv import *
 import rospy
 import numpy as np
 from urdf_parser_py.urdf import URDF

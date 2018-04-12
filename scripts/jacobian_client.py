@@ -1,5 +1,5 @@
 import rospy
-from sawyer_control.srv import *
+from robot_info.srv import *
 import numpy as np
 import ipdb
 joint_names = [
