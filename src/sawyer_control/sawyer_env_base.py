@@ -114,9 +114,9 @@ class SawyerEnv(Env, Serializable):
     def _Huber_reward(self, differences):
         a = np.abs(np.mean(differences))
         if a <= self.huber_delta:
-            reward = -1 / 2 * a ** 2 * self.reward_magnitude
+            reward = -1 / 2 * a ** 2
         else:
-            reward = -1 * self.huber_delta * (a - 1 / 2 * self.huber_delta) * self.reward_magnitude
+            reward = -1 * self.huber_delta * (a - 1 / 2 * self.huber_delta)
         return reward
 
     def _Norm_reward(self, differences):
@@ -132,7 +132,7 @@ class SawyerEnv(Env, Serializable):
     def step(self, action):
         self._act(action)
         observation = self._get_observation()
-        reward = self.reward()
+        reward = self.reward() * self.reward_magnitude
         done = False
         info = {}
         return observation, reward, done, info
