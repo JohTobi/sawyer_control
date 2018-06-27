@@ -144,19 +144,85 @@ class SawyerJointSpaceReachingEnv(SawyerEnv):
             self._randomize_desired_angles()
         return self._get_observation()
 
-class SawyerXYZReachingEnv(SawyerEnv):
+
+
+class SawyerXYZReaching(SawyerEnv, MultitaskEnv):
     def __init__(self,
                  desired = None,
                  randomize_goal_on_reset=False,
+                 XY_reaching=False,
+                 action_mode='position',
+                 z = 0.3,
                  **kwargs
                  ):
         Serializable.quick_init(self, locals())
-        super().__init__(**kwargs)
-        if desired is None:
-            self._randomize_desired_end_effector_pose()
-        else:
-            self.desired = desired
+        SawyerEnv.__init__(self, **kwargs)
+        MultitaskEnv.__init__(self, **kwargs)
+        # if desired is None:
+        #     self._randomize_desired_end_effector_pose()
+        # else:
+        #     self.desired = desired
         self._randomize_goal_on_reset = randomize_goal_on_reset
+        self.XY_reaching = XY_reaching
+        self.z = z
+        self.desired = desired
+        if self.XY_reaching:
+            self.desired[2] =  self.z
+        self._randomize_goal_on_reset = randomize_goal_on_reset
+        high = self.pd_safety_box_high
+        low = self.pd_safety_box_low
+        self.goal_space = Box(low, high)
+
+    @property
+    def goal_dim(self):
+        return 3
+
+    def convert_obs_to_goals(self, obs):
+        return obs[:, 21:24] # TODO: check this!
+
+    def sample_goals(self, batch_size):
+        return np.vstack([self.goal_space.sample() for i in range(batch_size)])
+
+    def set_goal(self, goal):
+
+        #self.MultitaskEnv.set_goal(goal)
+        MultitaskEnv.set_goal(self, goal)
+        # For VAE: actually need to move the arm to this position
+        self.desired = goal
+
+    def _join_act(self, action):
+        if self.XY_reaching:
+            return self._joint_act_xy(action)
+        else:
+            return super._joint_act(action)
+
+    def _joint_act_xy(self, action):
+        ee_pos = self._end_effector_pose()
+        if self.relative_pos_control:
+            target_ee_pos = (ee_pos[:3] + action)
+        else:
+            target_ee_pos = action
+        target_ee_pos = np.clip(target_ee_pos, self.pd_safety_box_low, self.pd_safety_box_high)
+        target_ee_pos = np.concatenate((target_ee_pos, ee_pos[3:]))
+        target_ee_pos[2] = self.z
+        angles = self.request_ik_angles(target_ee_pos, self._joint_angles())
+        self.send_angle_action(angles)
+
+
+    def _get_observation(self):
+        angles = self._joint_angles()
+        _, velocities, torques, _ = self.request_observation()
+        velocities = np.array(velocities)
+        torques = np.array(torques)
+        endpoint_pose = self._end_effector_pose()
+
+        temp = np.hstack((
+            angles,
+            velocities,
+            torques,
+            endpoint_pose,
+        ))
+        return temp
 
     def reward(self):
         current = self._end_effector_pose()[:3]
@@ -185,14 +251,6 @@ class SawyerXYZReachingEnv(SawyerEnv):
 
         self._observation_space = Box(lows, highs)
 
-    def _get_random_ee_pose(self, batch_size=1):
-        if self.action_mode == 'position':
-            reaching_box_lows = self.ee_safety_box_low
-            reaching_box_highs = self.ee_safety_box_high
-        else:
-            reaching_box_lows = self.not_reset_safety_box_lows + np.ones(3) * .2
-            reaching_box_highs = self.not_reset_safety_box_highs - np.ones(3) * .2
-        return np.random.uniform(reaching_box_lows, reaching_box_highs, size=(batch_size, 3))
 
     def _randomize_desired_end_effector_pose(self):
         self.desired = self._get_random_ee_pose()[0]
@@ -202,8 +260,9 @@ class SawyerXYZReachingEnv(SawyerEnv):
         self.in_reset = True
         self._safe_move_to_neutral()
         self.in_reset = False
-        if self._randomize_goal_on_reset:
-            self._randomize_desired_end_effector_pose()
+        # Don't randomize goal inside reset! In MultitaskEnv this is done by set_goal
+        # if self._randomize_goal_on_reset:
+            # self._randomize_desired_end_effector_pose()
         return self._get_observation()
 
     def _get_statistics_from_paths(self, paths):
@@ -258,5 +317,281 @@ class SawyerXYZReachingEnv(SawyerEnv):
         final_10_positions = np.array(final_10_positions)
         final_10_desired_positions = np.array(final_10_desired_positions)
         final_position_distances = np.linalg.norm(final_positions - final_desired_positions, axis=1)
-        final_10_positions_distances = np.linalg.norm(final_10_positions - final_10_desired_positions, axis=1)
-        return [distances, final_position_distances, final_10_positions_distances]
+        return [distances, final_position_distances]
+
+
+class SawyerXYZReachingImgMultitaskEnv(SawyerEnv, MultitaskEnv):
+    def __init__(self,
+                 desired = None,
+                 randomize_goal_on_reset=False,
+                 reprsentation_size = 16,
+                 **kwargs
+                 ):
+        Serializable.quick_init(self, locals())
+        SawyerEnv.__init__(self, **kwargs)
+        MultitaskEnv.__init__(self, **kwargs)
+        self.desired = np.zeros((3))
+        #vae safety box:
+        self.set_safety_box(
+            pos_low=np.array([0.53, -.25, 0.35]),
+            pos_high=np.array([0.65, 0.32, 0.5]),
+            torq_low=np.array([.3, -.25, .17]),
+            torq_high=np.array([0.65, .3, .55]),
+        )
+        high = np.array([0.65, 0.32, 0.5])
+        low = np.array([0.53, -.25, 0.35])
+        self.goal_space = Box(low, high)
+        self.img_observation = True
+        # self.goals = np.load('/home/mdalal/Documents/railrl-private/ee_positions.npy')
+        # self.imgs = np.load('/home/mdalal/Documents/railrl-private/images.npy')
+        # self.goal_idx = None
+    @property
+    def goal_dim(self):
+        return 3
+
+    def convert_obs_to_goals(self, obs):
+        return obs
+
+    def sample_goals(self, batch_size):
+        #sample a random set of goals from goal dict
+        # self.goal_idx= np.random.randint(0, self.goals.shape[0])
+        # goals = self.goals[self.goal_idx]
+        # return [goals]
+        return np.vstack([self.goal_space.sample() for i in range(batch_size)])
+
+    def set_goal(self, goal):
+        MultitaskEnv.set_goal(self, goal)
+        # For VAE: actually need to move the arm to this position
+        #instead of moving the arm to the position
+        # have a goal to image dict
+        self.thresh = False
+        print('Setting desired joint position:', goal)
+        self._joint_act(goal - self._end_effector_pose()[:3])
+        self.desired = goal
+        self.thresh = True
+        # return self.imgs[self.goal_idx]
+
+    def reward(self):
+        current = self._end_effector_pose()[:3]
+        differences = self.desired - current
+        reward = self.reward_function(differences)
+        return reward
+
+    def _set_observation_space(self):
+        self._observation_space = Box(np.zeros((21168,)), 1.0*np.ones(21168,))
+
+    def reset(self):
+        self.in_reset = True
+        self._safe_move_to_neutral()
+        self.in_reset = False
+        observation = self.get_image()
+        return observation
+
+    def _get_observation(self):
+        angles = self._joint_angles()
+        _, velocities, torques, _ = self.request_observation()
+        velocities = np.array(velocities)
+        torques = np.array(torques)
+        endpoint_pose = self._end_effector_pose()
+
+        temp = np.hstack((
+            angles,
+            velocities,
+            torques,
+            endpoint_pose,
+        ))
+        return temp
+
+    def step(self, action):
+        self._act(action)
+        observation = self._get_observation()
+        reward = self.reward() * self.reward_magnitude
+        done = False
+        info = {}
+        pos = np.array(observation[21:24])
+        info['distance_to_goal'] = np.linalg.norm(pos - self.desired)
+        observation = self.get_image()
+        return observation, reward, done, info
+
+
+    def _get_statistics_from_paths(self, paths):
+        statistics = OrderedDict()
+        stat_prefix = 'Test'
+        #distances_from_target = np.array([path['distance_to_goal'] for path in paths]).flatten()
+        distances_from_target = []
+        final_position_distances = []
+        for path in paths:
+            distances_from_target += [p['distance_to_goal'] for p in path['env_infos']]
+            final_position_distances += [[p['distance_to_goal'] for p in path['env_infos']][-1]]
+        final_position_distances = np.array(final_position_distances)
+        distances_from_target = np.array(distances_from_target)
+        statistics.update(self._update_statistics_with_observation(
+            distances_from_target,
+            stat_prefix,
+            'End Effector Distance from Target'
+        ))
+
+        statistics.update(self._update_statistics_with_observation(
+            final_position_distances,
+            stat_prefix,
+            'Final End Effector Distance from Target'
+        ))
+
+        return statistics
+
+
+class SawyerXYPushingImgMultitaskEnv(SawyerEnv, MultitaskEnv):
+
+    def __init__(self,
+                 desired = None,
+                 randomize_goal_on_reset=False,
+                 #z=0.3,
+                 pause_on_reset=False,
+                 **kwargs
+                 ):
+        Serializable.quick_init(self, locals())
+        SawyerEnv.__init__(self, **kwargs)
+        MultitaskEnv.__init__(self, **kwargs)
+        self.desired = np.zeros((4))
+        self.action_mode = 'position'
+        self.pause_on_reset = pause_on_reset
+        #set pushing safety box here
+        #goals are push the object to a spot, then reach a different position
+        self.pushing_box_high_obj = np.array([0.66, 0.1]) # for the same = 0.02265
+        self.pushing_box_low_obj = np.array([0.45, -0.1])
+        self.pushing_box_high_ee = np.array([0.76, 0.145])
+        self.pushing_box_low_ee = np.array([0.45, -0.12])
+        self.pushing_box_low = np.array([0.44, -0.12])
+        self.pushing_box_high = np.array([0.76, 0.145])
+        high = np.concatenate((self.pushing_box_high_obj, self.pushing_box_high_ee)) #make sure to concatenate with itself
+        low = np.concatenate((self.pushing_box_low_obj, self.pushing_box_low_ee))
+        self.goal_space = Box(low, high)
+        self.img_observation = True
+        self.z = 0.23128
+        self.img_observation = True
+        self.reset_position = np.array([0.4499366724, 0.02265634, 0.23128])
+        #self.set_safety_box(ee_low=np.array([0.405, -0.13, 0.23128]), ee_high=np.array([0.92, 0.156, 0.23128]))
+
+
+    @property
+    def goal_dim(self):
+        return 4 #xy for object position, xy for end effector position
+    def convert_obs_to_goals(self, obs):
+        return obs[:, 21:24] # TODO: check this!
+    def sample_goals(self, batch_size):
+        return np.vstack([self.goal_space.sample() for i in range(batch_size)])
+
+    def set_goal(self, goal,eval=True):
+        print('pause')
+        input()
+        if eval:
+            print('setting goal')
+            obj_goal = np.concatenate((goal[:2], [self.z]))
+            ee_goal = np.concatenate((goal[2:4], [self.z]))
+            MultitaskEnv.set_goal(self, goal)
+            #PAUSE FOR INPUT:
+            self.thresh=False
+            self._joint_act(obj_goal-self._end_effector_pose()[:3])
+            input()
+            self._joint_act(ee_goal - self._end_effector_pose()[:3])
+            print('setting ee')
+            input()
+            #PAUSE FOR INPUT
+            #PLACE OBJECT AT GOAL POSITION
+            #MOVES ROBOT ARM TO GOAL POSITION:
+
+            self.desired = goal
+            self.thresh = True
+
+
+    def get_image(self):
+        temp = self.request_image()
+        #update the get image in server. get an 84 x 84 x 3
+        #reshape to 84 x 84 x 3
+        temp = np.array(temp)
+        temp = temp.reshape(84, 84, 3)
+        img = temp[:40, 12:63]
+        img = cv2.resize(img, (0, 0), fx=1.64705882, fy=2.1)
+        observation = img
+        observation = img / 255.0
+        observation = observation.transpose()
+        observation = observation.flatten()
+        return observation
+
+    def reward(self):
+        '''
+        this is isnt used by the multitask env at all
+        :return:
+        '''
+        current = self._end_effector_pose()[:3]
+        # differences = self.desired - current
+        # reward = self.reward_function(differences)
+        return current
+
+    def _set_observation_space(self):
+        self._observation_space = Box(np.zeros((21168,)), 1.0*np.ones(21168,))
+
+    def _randomize_desired_end_effector_pose(self):
+        #self.desired = np.random.uniform(self.safety_box_lows, self.safety_box_highs, size=(1, 3))[0]
+        assert False # Don't randomize goal inside reset! In MultitaskEnv this is done by set_goal
+        high = self.ee_safety_box_high
+        low = self.ee_safety_box_low
+        dx = np.random.uniform(low[0], high[0])
+        dy = np.random.uniform(low[1], high[1])
+        dz = np.random.uniform(low[2], high[2])
+        self.desired =  np.array([dx, dy, dz])
+
+    def compute_her_reward_np(self, observation, action, next_observation, goal):
+        '''
+        this shouldn't be used either
+        :param observation:
+        :param action:
+        :param next_observation:
+        :param goal:
+        :return:
+        '''
+        return -np.linalg.norm(next_observation[21:24] - goal)
+
+    def reset(self, vae_reset=False):
+        self.in_reset = True
+        # self._safe_move_to_neutral()
+        self.thresh = False
+        self._joint_act(self.reset_position  - self._end_effector_pose()[:3])
+        self.in_reset = False
+        self.thresh = True
+        if self.pause_on_reset:
+            #PAUSE AND MOVE OBJECT TO ITS RESET POSITION
+            print('in reset')
+            input()
+        if self.img_observation:
+            observation = self.get_image()
+        else:
+            observation = self._get_observation()
+        return observation
+
+    def _joint_act(self, action):
+        ee_pos = self._end_effector_pose()
+        if self.relative_pos_control:
+            target_ee_pos = (ee_pos[:3] + action)
+        else:
+            target_ee_pos = action
+        target_ee_pos[2] = self.z
+        target_ee_pos[:2] = np.clip(target_ee_pos[:2], self.pushing_box_low, self.pushing_box_high)
+        target_ee_pos = np.concatenate((target_ee_pos, ee_pos[3:]))
+        angles = self.request_ik_angles(target_ee_pos, self._joint_angles())
+        self.send_angle_action(angles)
+
+
+    def step(self, action):
+        self._act(action)
+        observation = self._get_observation()
+        reward = self.reward() * self.reward_magnitude
+        done = False
+        info = {}
+        if self.img_observation:
+            observation = self.get_image()
+        return observation, reward, done, info
+
+
+    def _get_statistics_from_paths(self, paths):
+        return OrderedDict()
