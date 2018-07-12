@@ -23,6 +23,26 @@ JOINT_ANGLES_LOW = np.array([
     -3.05899989
 ])
 
+# RESET_JOINT_ANGLES = {
+#     'right_j0':0.0023603515625,
+#     'right_j1':-1.1780478515625,
+#     'right_j2':-0.0023701171875,
+#     'right_j3':2.1777578125,
+#     'right_j4':-0.000716796875,
+#     'right_j5':0.564845703125,
+#     'right_j6':3.318611328125,
+# }
+
+RESET_JOINT_ANGLES = {
+    'right_j0':-0.0002119140625,
+    'right_j1':-1.180826171875,
+    'right_j2':0.0018076171875,
+    'right_j3':2.181935546875,
+    'right_j4':-0.00154296875,
+    'right_j5':0.5604951171875,
+    'right_j6':3.317990234375,
+}
+
 JOINT_VEL_HIGH = 2*np.ones(7)
 JOINT_VEL_LOW = -2*np.ones(7)
 
@@ -87,4 +107,4 @@ UPDATE_HZ = 20
 
 #JOINT_CONTROLLER_SETTINGS
 JOINT_POSITION_SPEED = .1
-JOINT_POSITION_TIMEOUT = .5 
+JOINT_POSITION_TIMEOUT = .5

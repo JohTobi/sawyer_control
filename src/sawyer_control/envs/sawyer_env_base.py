@@ -34,7 +34,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
         self._set_action_space()
         self._set_observation_space()
-        self.get_latest_pose_jacobian_dict()
+        #self.get_latest_pose_jacobian_dict()
         self.torque_action_scale = torque_action_scale
         self.position_action_scale = position_action_scale
         self.in_reset = True
@@ -52,7 +52,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         ee_pos = self._get_endeffector_pose()
         endeffector_pos = ee_pos[:3]
         endeffector_angles = ee_pos[3:]
-        target_ee_pos = (endeffector_pos + action)
+        target_ee_pos = (endeffector_pos + action[:3])
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
         target_ee_pos = np.concatenate((target_ee_pos, endeffector_angles))
         angles = self.request_ik_angles(target_ee_pos, self._get_joint_angles())
@@ -92,7 +92,8 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
     def _get_endeffector_pose(self):
         _, _, endpoint_pose = self.request_observation()
-        return endpoint_pose[:3]
+        # return endpoint_pose[:3]
+        return endpoint_pose
 
     def compute_angle_difference(self, angles1, angles2):
         deltas = np.abs(angles1 - angles2)
@@ -106,7 +107,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         info = self._get_info()
         done = False
         return observation, reward, done, info
-    
+
     def _get_obs(self):
         angles, velocities, endpoint_pose = self.request_observation()
         obs = np.hstack((
@@ -119,7 +120,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def compute_rewards(self, actions, obs, goals):
         pass
-    
+
     def _get_info(self):
         return dict()
 
@@ -138,7 +139,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         VELOCITY_THRESHOLD = .002 * np.ones(7)
         no_velocity = (velocities < VELOCITY_THRESHOLD).all()
         return close_to_desired_reset_pos and no_velocity
-    
+
     def _check_reset_angles_within_threshold(self):
         desired_neutral = self.AnglePDController._des_angles
         desired_neutral = np.array([desired_neutral[joint] for joint in self.config.JOINT_NAMES])
@@ -268,7 +269,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     @property
     def observation_space(self):
         return self._observation_space
-    
+
     def _set_action_space(self):
         if self.action_mode == 'position':
             self._action_space = Box(
@@ -298,9 +299,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             lows,
             highs,
         )
-            
-    """ 
-    ROS Functions 
+
+    """
+    ROS Functions
     """
 
     def init_rospy(self, update_hz):
