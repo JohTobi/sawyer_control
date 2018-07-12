@@ -2,11 +2,13 @@
 from sawyer_control.envs.sawyer_reaching import SawyerReachXYZEnv
 from sawyer_control.envs.sawyer_insertion import SawyerHumanControlEnv
 import numpy as np
-# env = SawyerReachXYZEnv()
+# env = SawyerReachXYZEnv(action_mode='position', position_action_scale = 1)
+# obs = env._get_obs()
+# env._act([0, 0.1, 0])
 # env.reset()
 #
 env = SawyerHumanControlEnv(action_mode='position', position_action_scale = 1)
-# env.reset()
+# # env.reset()
 for i in range(100):
     u = env.human_controller()
     env._act(u)
@@ -17,6 +19,6 @@ for i in range(100):
     if np.linalg.norm(dis) < 0.1:
         print("Goal reached")
         break
-# env.reset()
-
-print("END")
+# # env.reset()
+#
+# print("END")

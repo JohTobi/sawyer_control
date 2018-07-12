@@ -20,7 +20,7 @@ def compute_joint_angle(req):
     )
 
     pose = get_pose_stamped(ee_pos[0], ee_pos[1], ee_pos[2], Q)
-    reset_angles = ros_config.RESET_JOINT_ANGLES
+    reset_angles = ros_config.RESET_DICT
     ik_angles = get_joint_angles(pose, reset_angles, True)
     ik_angles = [ik_angles[joint] for joint in joint_names]
     print(ik_angles)
