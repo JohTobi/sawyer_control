@@ -54,10 +54,13 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         ee_pos = self._get_endeffector_pose()
         endeffector_pos = ee_pos[:3]
         endeffector_angles = ee_pos[3:]
+        endeffector_angles = np.array([0.70844293, 0.70576, 0.00232099, 0.00245258])
         target_ee_pos = (endeffector_pos + action[:3])
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
         target_ee_pos = np.concatenate((target_ee_pos, endeffector_angles))
         angles = self.request_ik_angles(target_ee_pos, self._get_joint_angles())
+        # print(angles)
+        # import ipdb; ipdb.set_trace() # BREAKPOINT
         self.send_angle_action(angles)
 
     def _torque_act(self, action):
@@ -130,7 +133,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         for i in range(self.config.RESET_LENGTH):
             cur_pos, cur_vel, _ = self.request_observation()
             torques = self.AnglePDController._compute_pd_forces(cur_pos, cur_vel)
-            self._torque_act(torques)
+            self._position_act(torques)
             if self._reset_complete():
                 break
 
